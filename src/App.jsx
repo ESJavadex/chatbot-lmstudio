@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chat, MessageInput, Sidebar } from './components'
 
-const API_BASE = ''
+const API_BASE = '/api'
 const STORAGE_KEY = 'chatbot_lmstudio_conversations_v1'
 
 function App() {
@@ -41,7 +41,7 @@ function App() {
 
   const loadAvailableModels = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/v1/models`)
+      const response = await fetch(`${API_BASE}/v1/models`)
       const data = await response.json()
       const modelList = Array.isArray(data) ? data : (data.models || data.data || [])
       setModels(modelList)
