@@ -20,7 +20,7 @@ fs.mkdirSync(conversationsDir, { recursive: true })
 
 const API_BASE_URL = 'http://localhost:1234'
 
-app.get('/api/v1/models', async (req, res) => {
+app.get('/v1/models', async (req, res) => {
   try {
     // Proxy to LM Studio API to get real-time model list with loading status
     const response = await fetch(`${API_BASE_URL}/api/v1/models`)
@@ -35,7 +35,7 @@ app.get('/api/v1/models', async (req, res) => {
   }
 })
 
-app.post('/api/v1/models/load', async (req, res) => {
+app.post('/v1/models/load', async (req, res) => {
   try {
     const response = await fetch(`${API_BASE_URL}/api/v1/models/load`, {
       method: 'POST',
@@ -53,7 +53,7 @@ app.post('/api/v1/models/load', async (req, res) => {
   }
 })
 
-app.post('/api/v1/models/unload', async (req, res) => {
+app.post('/v1/models/unload', async (req, res) => {
   try {
     const response = await fetch(`${API_BASE_URL}/api/v1/models/unload`, {
       method: 'POST',
@@ -71,36 +71,41 @@ app.post('/api/v1/models/unload', async (req, res) => {
   }
 })
 
-app.post('/api/v1/chat', async (req, res) => {
-  const { messages } = req.body
-
-  if (!currentModel) {
-    return res.status(500).json({ error: 'No model selected' })
-  }
-
+// Proxy chat completions to LM Studio (OpenAI-compatible endpoint)
+app.post('/v1/chat/completions', async (req, res) => {
   try {
     const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: currentModel.name,
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        }))
-      })
+      body: JSON.stringify(req.body)
     })
 
     if (!response.ok) {
       throw new Error(`LM Studio API error: ${response.statusText}`)
     }
 
-    const data = await response.json()
-    
-    res.json({
-      content: data.choices?.[0]?.message?.content || 'No response',
-      model: currentModel.name
-    })
+    // Check if response is streaming
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/event-stream') || req.body.stream) {
+      // Stream the response
+      res.setHeader('Content-Type', 'text/event-stream')
+      res.setHeader('Cache-Control', 'no-cache')
+      res.setHeader('Connection', 'keep-alive')
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        res.write(decoder.decode(value, { stream: true }))
+      }
+      res.end()
+    } else {
+      // Non-streaming response
+      const data = await response.json()
+      res.json(data)
+    }
   } catch (error) {
     console.error('Error calling LM Studio API:', error)
     res.status(500).json({ error: error.message })

@@ -7,9 +7,10 @@ export default defineConfig({
     port: 3001,
     host: '0.0.0.0',
     proxy: {
-      '/v1': {
-        target: 'http://127.0.0.1:1234',
+      '/api/v1': {
+        target: 'http://127.0.0.1:3000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
         configure: (proxy, options) => {
           proxy.on('error', (err, req, res) => {
             console.error('Proxy error:', err.message);
