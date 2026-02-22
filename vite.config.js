@@ -4,12 +4,18 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: 3001,
     host: '0.0.0.0',
     proxy: {
       '/v1': {
-        target: 'http://localhost:1234',
-        changeOrigin: true
+        target: 'http://127.0.0.1:1234',
+        changeOrigin: true,
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.error('Proxy error:', err.message);
+            res.status(502).json({ error: 'Backend unavailable' });
+          });
+        }
       }
     }
   }

@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+marked.setOptions({ gfm: true, breaks: true })
 
 export function Chat({ messages, onEditMessage, onDeleteMessage }) {
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editContent, setEditContent] = useState('')
   const endRef = useRef(null)
 
+  const renderMarkdown = (text = '') => {
+    const raw = marked.parse(text)
+    return DOMPurify.sanitize(raw)
+  }
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length])
+  }, [messages])
 
   const handleEdit = (message) => {
     setEditingMessageId(message.id)
@@ -50,7 +59,7 @@ export function Chat({ messages, onEditMessage, onDeleteMessage }) {
                     </div>
                   </div>
                 ) : (
-                  <p className="message-content">{message.content}</p>
+                  <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
                 )}
               </div>
 
