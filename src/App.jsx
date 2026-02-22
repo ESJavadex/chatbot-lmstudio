@@ -41,11 +41,26 @@ function App() {
 
   const loadAvailableModels = async () => {
     try {
-      const response = await fetch(`${API_BASE}/v1/models`)
+      const response = await fetch(`${API_BASE}/api/v1/models`)
       const data = await response.json()
       const modelList = Array.isArray(data) ? data : (data.models || data.data || [])
       setModels(modelList)
-      if (modelList.length > 0 && !selectedModel) setSelectedModel(modelList[0])
+
+      if (modelList.length > 0 && !selectedModel) {
+        const preferredOrder = [
+          'qwen3-coder-next',
+          'qwen3-14b-claude-sonnet-4.5-reasoning-distill',
+          'openai-gpt-oss-20b-abliterated-uncensored-neo-imatrix',
+        ]
+
+        const preferred = preferredOrder
+          .map((id) => modelList.find((m) => (m.id || m.name) === id))
+          .find(Boolean)
+
+        // Prefer loaded models
+        const loadedModel = modelList.find((m) => (m.loaded_instances || []).length > 0)
+        setSelectedModel(loadedModel || preferred || modelList[0])
+      }
     } catch (error) {
       console.error('Error loading models:', error)
     }
@@ -129,7 +144,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: selectedModel.id || selectedModel.name,
+          model: selectedModel.id || selectedModel.key || selectedModel.name,
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
         }),
@@ -185,20 +200,13 @@ function App() {
             }
           }
         }
+      } else {
+        const data = await response.json()
+        assistantText = data?.choices?.[0]?.message?.content || data.content || data.message || ''
       }
 
       if (!assistantText) {
-        // Fallback for providers that ignore stream=true
-        const fallbackResponse = await fetch(`${API_BASE}/v1/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: selectedModel.id || selectedModel.name,
-            messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-          }),
-        })
-        const data = await fallbackResponse.json()
-        assistantText = data?.choices?.[0]?.message?.content || data.content || data.message || 'No response'
+        assistantText = 'No response'
       }
 
       const finalMessages = [...nextMessages, { ...seedAssistant, content: assistantText }]

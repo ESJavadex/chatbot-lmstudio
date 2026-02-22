@@ -68,15 +68,32 @@ export function Sidebar({
         {showModels && (
           <div className="model-list">
             {models.map((model) => {
-              const modelName = model.name || model.id || model.display_name || 'unknown-model'
-              const isActive = (selectedModel?.id || selectedModel?.name) === (model.id || model.name)
+              const modelName = model.display_name || model.name || model.id || 'unknown-model'
+              const modelKey = model.id || model.key || model.name
+              const isActive = (selectedModel?.id || selectedModel?.key || selectedModel?.name) === modelKey
+              const isLoaded = (model.loaded_instances || []).length > 0
+              const loadedInfo = model.loaded_instances?.[0]
+
               return (
                 <div
-                  key={model.id || model.name}
-                  className={`model-item ${isActive ? 'active' : ''}`}
+                  key={modelKey}
+                  className={`model-item ${isActive ? 'active' : ''} ${isLoaded ? 'loaded' : 'not-loaded'}`}
                   onClick={() => onSelectModel(model)}
                 >
-                  {modelName}
+                  <div className="model-info">
+                    <span className="model-status">
+                      {isLoaded ? '🟢' : '⚪'}
+                    </span>
+                    <span className="model-name">{modelName}</span>
+                  </div>
+                  {isLoaded && loadedInfo && (
+                    <div className="model-details">
+                      <small>Context: {loadedInfo.config?.context_length || 'N/A'} tokens</small>
+                      {loadedInfo.config?.flash_attention !== undefined && (
+                        <small>Flash: {loadedInfo.config.flash_attention ? '✓' : '✗'}</small>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}

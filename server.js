@@ -20,57 +20,60 @@ fs.mkdirSync(conversationsDir, { recursive: true })
 
 const API_BASE_URL = 'http://localhost:1234'
 
-app.get('/api/v1/models', (req, res) => {
-  fs.readdir(path.join(process.env.HOME || '/home/javadex-homelab', '.lmstudio/models'), (err, dirs) => {
-    if (err) {
-      console.error('Error reading models directory:', err)
-      return res.status(500).json({ error: 'Failed to load models' })
+app.get('/api/v1/models', async (req, res) => {
+  try {
+    // Proxy to LM Studio API to get real-time model list with loading status
+    const response = await fetch(`${API_BASE_URL}/api/v1/models`)
+    if (!response.ok) {
+      throw new Error(`LM Studio API error: ${response.statusText}`)
     }
-
-    const modelList = []
-    
-    let completedCount = 0
-    let totalDirs = dirs.length
-    
-    dirs.forEach(dir => {
-      const modelPath = path.join(process.env.HOME || '/home/javadex-homelab', '.lmstudio/models', dir)
-      fs.readdir(modelPath, (err, files) => {
-        if (!err && files.length > 0) {
-          files.forEach(file => {
-            if (file.endsWith('.gguf')) {
-              const modelInfo = {
-                name: file,
-                path: modelPath,
-                size: fs.statSync(path.join(modelPath, file)).size
-              }
-              modelList.push(modelInfo)
-              
-              if (modelList.length === 1 && !currentModel) {
-                currentModel = modelInfo
-              }
-            }
-          })
-        } else if (!err && files.length === 0) {
-          totalDirs--
-        }
-        
-        completedCount++
-        
-        if (completedCount === dirs.length) {
-          res.json(modelList)
-        }
-      })
-    })
-
-    if (dirs.length === 0) {
-      res.json([])
-    }
-  })
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    console.error('Error fetching models from LM Studio:', err)
+    res.status(500).json({ error: 'Failed to load models from LM Studio' })
+  }
 })
 
-app.post('/api/v1/chat', async (req, body) => {
+app.post('/api/v1/models/load', async (req, res) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/models/load`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    })
+    if (!response.ok) {
+      throw new Error(`LM Studio API error: ${response.statusText}`)
+    }
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    console.error('Error loading model:', err)
+    res.status(500).json({ error: 'Failed to load model' })
+  }
+})
+
+app.post('/api/v1/models/unload', async (req, res) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/models/unload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    })
+    if (!response.ok) {
+      throw new Error(`LM Studio API error: ${response.statusText}`)
+    }
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    console.error('Error unloading model:', err)
+    res.status(500).json({ error: 'Failed to unload model' })
+  }
+})
+
+app.post('/api/v1/chat', async (req, res) => {
   const { messages } = req.body
-  
+
   if (!currentModel) {
     return res.status(500).json({ error: 'No model selected' })
   }
