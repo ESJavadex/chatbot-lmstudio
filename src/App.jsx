@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Chat, MessageInput, Sidebar } from './components'
+import { Chat, MessageInput, MobileSidebar, Sidebar } from './components'
 
 const API_BASE = '/api'
 const STORAGE_KEY = 'chatbot_lmstudio_conversations_v1'
@@ -11,11 +11,29 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null)
   const [conversations, setConversations] = useState([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024)
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024)
   const [isSending, setIsSending] = useState(false)
+  const [lmStudioRunning, setLmStudioRunning] = useState(false)
+  const [lmStudioApiAvailable, setLmStudioApiAvailable] = useState(false)
+  const [lmStudioMessage, setLmStudioMessage] = useState('')
 
   useEffect(() => {
     loadAvailableModels()
     loadConversationsFromStorage()
+    checkLmStudioStatus()
+  }, [])
+
+  useEffect(() => {
+    const onResize = () => {
+      const desktop = window.innerWidth >= 1024
+      setIsDesktop(desktop)
+      if (desktop) {
+        setIsSidebarOpen(true)
+      }
+    }
+
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   const selectedModelName = useMemo(
@@ -42,7 +60,22 @@ function App() {
   const loadAvailableModels = async () => {
     try {
       const response = await fetch(`${API_BASE}/v1/models`)
+      if (!response.ok) {
+        // LM Studio not running - silent fail
+        return
+      }
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        return
+      }
       const data = await response.json()
+
+      // Handle error responses
+      if (data.error) {
+        // LM Studio not running - silent fail
+        return
+      }
+
       const modelList = Array.isArray(data) ? data : (data.models || data.data || [])
       setModels(modelList)
 
@@ -62,7 +95,98 @@ function App() {
         setSelectedModel(loadedModel || preferred || modelList[0])
       }
     } catch (error) {
-      console.error('Error loading models:', error)
+      // Silent fail - LM Studio not running
+    }
+  }
+
+  const checkLmStudioStatus = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/lm-studio-status`)
+      if (!response.ok) {
+        setLmStudioRunning(false)
+        setLmStudioApiAvailable(false)
+        return
+      }
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        setLmStudioRunning(false)
+        setLmStudioApiAvailable(false)
+        return
+      }
+      const data = await response.json()
+      setLmStudioRunning(data.running)
+      setLmStudioApiAvailable(data.apiAvailable || false)
+    } catch (error) {
+      setLmStudioRunning(false)
+      setLmStudioApiAvailable(false)
+    }
+  }
+
+  const startLmStudio = async () => {
+    setLmStudioMessage('Iniciando LM Studio...')
+    try {
+      const response = await fetch(`${API_BASE}/start-lm-studio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json()
+          setLmStudioMessage(data.message || data.error || `Error ${response.status}`)
+        } else {
+          setLmStudioMessage(`Error ${response.status}: ${response.statusText}`)
+        }
+        setTimeout(() => setLmStudioMessage(''), 5000)
+        return
+      }
+
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        setLmStudioMessage('Respuesta inválida del servidor')
+        setTimeout(() => setLmStudioMessage(''), 5000)
+        return
+      }
+
+      const data = await response.json()
+
+      // Check if it says already running
+      if (data.message && data.message.includes('already running')) {
+        setLmStudioRunning(true)
+        setLmStudioMessage('LM Studio API server ya está corriendo')
+        setTimeout(() => setLmStudioMessage(''), 3000)
+        setTimeout(() => checkLmStudioStatus(), 2000)
+        return
+      }
+
+      setLmStudioRunning(true)
+      setLmStudioApiAvailable(false) // API may need time to start
+      setLmStudioMessage(data.message || 'LM Studio iniciado correctamente')
+
+      // Poll for API availability
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`${API_BASE}/lm-studio-status`)
+          const statusData = await statusResponse.json()
+          if (statusData.apiAvailable) {
+            setLmStudioApiAvailable(true)
+            setLmStudioMessage('LM Studio API disponible')
+            clearInterval(pollInterval)
+            setTimeout(() => setLmStudioMessage(''), 3000)
+            loadAvailableModels()
+          }
+        } catch {
+          // Keep polling
+        }
+      }, 2000)
+
+      // Stop polling after 30 seconds
+      setTimeout(() => clearInterval(pollInterval), 30000)
+    } catch (error) {
+      console.error('Error starting LM Studio:', error)
+      setLmStudioMessage('Error de conexión al iniciar LM Studio')
+      setTimeout(() => setLmStudioMessage(''), 5000)
     }
   }
 
@@ -230,42 +354,94 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar
-        isOpen={isSidebarOpen}
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={loadConversation}
-        onCreateNew={() => {
-          createNewConversation()
-          if (window.innerWidth < 1024) setIsSidebarOpen(false)
-        }}
-        onDeleteConversation={deleteConversation}
-        models={models}
-        selectedModel={selectedModel}
-        onSelectModel={(model) => {
-          setSelectedModel(model)
-          if (window.innerWidth < 1024) setIsSidebarOpen(false)
-        }}
-        onClose={() => setIsSidebarOpen(false)}
-      />
-
-      {isSidebarOpen && <div className="sidebar-backdrop" onClick={() => setIsSidebarOpen(false)} />}
+      {isDesktop ? (
+        <Sidebar
+          isOpen={true}
+          conversations={conversations}
+          currentConversationId={currentConversationId}
+          onSelectConversation={loadConversation}
+          onCreateNew={() => {
+            createNewConversation()
+            if (window.innerWidth < 1024) setIsSidebarOpen(false)
+          }}
+          onDeleteConversation={deleteConversation}
+          models={models}
+          selectedModel={selectedModel}
+          onSelectModel={(model) => {
+            setSelectedModel(model)
+            if (window.innerWidth < 1024) setIsSidebarOpen(false)
+          }}
+          onClose={() => setIsSidebarOpen(false)}
+          onModelLoad={loadAvailableModels}
+        />
+      ) : (
+        <MobileSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}>
+          <Sidebar
+            isOpen={true}
+            showHeader={false}
+            conversations={conversations}
+            currentConversationId={currentConversationId}
+            onSelectConversation={loadConversation}
+            onCreateNew={() => {
+              createNewConversation()
+              if (window.innerWidth < 1024) setIsSidebarOpen(false)
+            }}
+            onDeleteConversation={deleteConversation}
+            models={models}
+            selectedModel={selectedModel}
+            onSelectModel={(model) => {
+              setSelectedModel(model)
+              if (window.innerWidth < 1024) setIsSidebarOpen(false)
+            }}
+            onClose={() => setIsSidebarOpen(false)}
+            onModelLoad={loadAvailableModels}
+          />
+        </MobileSidebar>
+      )}
 
       <main className="chat-layout">
         <header className="chat-header">
           <button className="icon-btn" onClick={() => setIsSidebarOpen((v) => !v)} title="Menu">☰</button>
           <div className="header-main">
             <h1>Chat LM Studio</h1>
-            <p>{selectedModelName ? `Modelo: ${selectedModelName}` : 'Selecciona un modelo'}</p>
+            <p>
+              {selectedModelName ? `Modelo: ${selectedModelName}` :
+               !lmStudioApiAvailable ? 'LM Studio API no disponible' :
+               models.length === 0 ? 'Carga un modelo' :
+               'Selecciona un modelo'}
+            </p>
           </div>
-          <button className="new-chat-btn" onClick={createNewConversation}>Nueva</button>
+          <div className="header-actions">
+            {!lmStudioApiAvailable && (
+              <button
+                className="icon-btn"
+                onClick={startLmStudio}
+                title="Iniciar LM Studio"
+                style={{ marginRight: '0.5rem' }}
+              >
+                🚀
+              </button>
+            )}
+            {lmStudioMessage && (
+              <span className="header-message">{lmStudioMessage}</span>
+            )}
+            <button className="new-chat-btn" onClick={createNewConversation}>Nueva</button>
+          </div>
         </header>
 
         <section className="chat-body">
           {messages.length === 0 ? (
             <div className="empty-state">
               <h2>Empieza a chatear</h2>
-              <p>{selectedModelName ? 'Escribe abajo para empezar una conversación.' : 'Selecciona un modelo en el panel lateral.'}</p>
+              <p>
+                {!lmStudioApiAvailable
+                  ? 'Clica el botón 🚀 para iniciar el API server de LM Studio'
+                  : !selectedModelName && models.length === 0
+                  ? 'Carga un modelo en LM Studio (o desde la CLI con `lms load`)'
+                  : selectedModelName
+                  ? 'Escribe abajo para empezar una conversación.'
+                  : 'Selecciona un modelo en el panel lateral.'}
+              </p>
             </div>
           ) : (
             <Chat

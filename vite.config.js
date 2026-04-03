@@ -17,6 +17,26 @@ export default defineConfig({
             res.status(502).json({ error: 'Backend unavailable' });
           });
         }
+      },
+      '/api/start-lm-studio': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.error('Proxy error:', err.message);
+            res.status(502).json({ error: 'Backend unavailable' });
+          });
+        }
+      },
+      '/api/lm-studio-status': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.error('Proxy error:', err.message);
+            res.status(502).json({ error: 'Backend unavailable' });
+          });
+        }
       }
     }
   }

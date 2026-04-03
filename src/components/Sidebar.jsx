@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 
+const API_BASE = '/api'
+
 export function Sidebar({
   isOpen,
+  showHeader = true,
   conversations,
   currentConversationId,
   onSelectConversation,
@@ -11,9 +14,68 @@ export function Sidebar({
   selectedModel,
   onSelectModel,
   onClose,
+  onModelLoad,
 }) {
   const [query, setQuery] = useState('')
   const [showModels, setShowModels] = useState(true)
+  const [loadingModels, setLoadingModels] = useState({})
+
+  const refreshModelsWithRetry = async (retries = 5, delayMs = 1200) => {
+    if (!onModelLoad) return
+    for (let i = 0; i < retries; i++) {
+      await onModelLoad()
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, delayMs))
+      }
+    }
+  }
+
+  const loadModel = async (modelId, modelName) => {
+    setLoadingModels(prev => ({ ...prev, [modelId]: true }))
+    try {
+      const response = await fetch(`${API_BASE}/v1/models/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: modelId })
+      })
+
+      if (response.ok) {
+        await refreshModelsWithRetry()
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        alert(`Error cargando ${modelName}: ${errorData.error || errorData.message || 'Error desconocido'}`)
+      }
+    } catch (error) {
+      console.error('Error loading model:', error)
+      alert(`Error cargando ${modelName}: ${error.message}`)
+    } finally {
+      setLoadingModels(prev => ({ ...prev, [modelId]: false }))
+    }
+  }
+
+  const unloadModel = async (modelId, e) => {
+    e.stopPropagation()
+    setLoadingModels(prev => ({ ...prev, [modelId]: true }))
+    try {
+      const response = await fetch(`${API_BASE}/v1/models/unload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: modelId })
+      })
+
+      if (response.ok) {
+        await refreshModelsWithRetry()
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        alert(`Error descargando modelo: ${errorData.error || errorData.message || 'Error desconocido'}`)
+      }
+    } catch (error) {
+      console.error('Error unloading model:', error)
+      alert(`Error descargando modelo: ${error.message}`)
+    } finally {
+      setLoadingModels(prev => ({ ...prev, [modelId]: false }))
+    }
+  }
 
   const filteredConversations = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -23,10 +85,12 @@ export function Sidebar({
 
   return (
     <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
-      <div className="sidebar-header">
-        <h3>Workspace</h3>
-        <button className="icon-btn" onClick={onClose}>✕</button>
-      </div>
+      {showHeader && (
+        <div className="sidebar-header">
+          <h3>Workspace</h3>
+          <button className="icon-btn close-sidebar-btn" aria-label="Cerrar panel lateral" onClick={onClose}>✕</button>
+        </div>
+      )}
 
       <button onClick={onCreateNew} className="new-chat-btn full">+ Nueva conversación</button>
 
@@ -73,6 +137,7 @@ export function Sidebar({
               const isActive = (selectedModel?.id || selectedModel?.key || selectedModel?.name) === modelKey
               const isLoaded = (model.loaded_instances || []).length > 0
               const loadedInfo = model.loaded_instances?.[0]
+              const isLoading = loadingModels[modelKey]
 
               return (
                 <div
@@ -81,8 +146,8 @@ export function Sidebar({
                   onClick={() => onSelectModel(model)}
                 >
                   <div className="model-info">
-                    <span className="model-status">
-                      {isLoaded ? '🟢' : '⚪'}
+                    <span className={`model-status ${isLoaded ? 'loaded' : 'not-loaded'}`}>
+                      {isLoaded ? '●' : '○'}
                     </span>
                     <span className="model-name">{modelName}</span>
                   </div>
@@ -94,6 +159,31 @@ export function Sidebar({
                       )}
                     </div>
                   )}
+                  <div className="model-actions">
+                    {!isLoaded && (
+                      <button
+                        className="model-action-btn load-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          loadModel(modelKey, modelName)
+                        }}
+                        disabled={isLoading}
+                        title={`Cargar ${modelName}`}
+                      >
+                        {isLoading ? '⏳' : '➕'}
+                      </button>
+                    )}
+                    {isLoaded && (
+                      <button
+                        className="model-action-btn unload-btn"
+                        onClick={(e) => unloadModel(modelKey, e)}
+                        disabled={isLoading}
+                        title={`Descargar ${modelName}`}
+                      >
+                        {isLoading ? '⏳' : '➖'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             })}
