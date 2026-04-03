@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chat, MessageInput, MobileSidebar, Sidebar } from './components'
 
 const API_BASE = '/api'
@@ -13,6 +13,7 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024)
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024)
   const [isSending, setIsSending] = useState(false)
+  const abortControllerRef = useRef(null)
   const [lmStudioRunning, setLmStudioRunning] = useState(false)
   const [lmStudioApiAvailable, setLmStudioApiAvailable] = useState(false)
   const [lmStudioMessage, setLmStudioMessage] = useState('')
@@ -243,6 +244,13 @@ function App() {
     if (conversationId) saveConversation(conversationId, nextMessages)
   }
 
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+  }
+
   const handleSendMessage = async (content) => {
     if (!selectedModelName || !content.trim() || isSending) return
 
@@ -297,45 +305,40 @@ function App() {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        let lastSaveLen = 0
 
-        const handleVisibility = () => {
-          if (document.visibilityState === 'hidden' && !controller.signal.aborted) {
-            controller.abort()
-          }
-        }
-        document.addEventListener('visibilitychange', handleVisibility)
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
 
-        try {
-          while (true) {
-            const { value, done } = await reader.read()
-            if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
 
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
+          for (const raw of lines) {
+            const line = raw.trim()
+            if (!line) continue
 
-            for (const raw of lines) {
-              const line = raw.trim()
-              if (!line) continue
+            const payload = line.startsWith('data:') ? line.slice(5).trim() : line
+            if (payload === '[DONE]') continue
 
-              const payload = line.startsWith('data:') ? line.slice(5).trim() : line
-              if (payload === '[DONE]') continue
+            try {
+              const parsed = JSON.parse(payload)
+              const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.choices?.[0]?.text ?? ''
+              if (delta) {
+                assistantText += delta
+                const updated = [...nextMessages, { ...seedAssistant, content: assistantText }]
+                setMessages(updated)
 
-              try {
-                const parsed = JSON.parse(payload)
-                const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.choices?.[0]?.text ?? ''
-                if (delta) {
-                  assistantText += delta
-                  const updated = [...nextMessages, { ...seedAssistant, content: assistantText }]
-                  setMessages(updated)
+                if (assistantText.length - lastSaveLen > 200) {
+                  saveConversation(convoId, updated)
+                  lastSaveLen = assistantText.length
                 }
-              } catch {
-                // Ignore non-JSON chunks
               }
+            } catch {
+              // Ignore non-JSON chunks
             }
           }
-        } finally {
-          document.removeEventListener('visibilitychange', handleVisibility)
         }
       } else {
         const data = await response.json()
@@ -353,11 +356,11 @@ function App() {
       console.error('Error sending message:', error)
       if (error.name === 'AbortError') {
         if (assistantText) {
-        const interrupted = [...nextMessages, { ...seedAssistant, content: assistantText + '\n\n_(respuesta interrumpida al cambiar de pestaña_)' }]
-        setMessages(interrupted)
-        saveConversation(convoId, interrupted)
-      }
-    } else {
+          const interrupted = [...nextMessages, { ...seedAssistant, content: assistantText + '\n\n_(generación detenida_)' }]
+          setMessages(interrupted)
+          saveConversation(convoId, interrupted)
+        }
+      } else {
       const errorMessage = {
         id: (Date.now() + 2).toString(),
         role: 'assistant',
@@ -369,6 +372,7 @@ function App() {
       saveConversation(convoId, finalMessages)
     }
     } finally {
+      abortControllerRef.current = null
       setIsSending(false)
     }
   }
@@ -473,7 +477,7 @@ function App() {
           )}
         </section>
 
-        <MessageInput onSend={handleSendMessage} isSending={isSending} disabled={!selectedModelName} />
+        <MessageInput onSend={handleSendMessage} onStop={stopGeneration} isSending={isSending} disabled={!selectedModelName} />
       </main>
     </div>
   )

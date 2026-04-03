@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-export function MessageInput({ onSend, isSending = false, disabled = false }) {
+export function MessageInput({ onSend, onStop, isSending = false, disabled = false }) {
   const [message, setMessage] = useState('')
   const textareaRef = useRef(null)
 
@@ -38,9 +38,15 @@ export function MessageInput({ onSend, isSending = false, disabled = false }) {
         disabled={disabled || isSending}
       />
 
-      <button onClick={handleSend} disabled={!message.trim() || disabled || isSending} className="send-btn">
-        {isSending ? '…' : '➤'}
-      </button>
+      {isSending ? (
+        <button onClick={onStop} className="stop-btn" title="Detener generación">
+          ■
+        </button>
+      ) : (
+        <button onClick={handleSend} disabled={!message.trim() || disabled || isSending} className="send-btn">
+          ➤
+        </button>
+      )}
     </div>
   )
 }
