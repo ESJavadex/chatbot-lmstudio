@@ -443,7 +443,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' })
 })
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Chatbot server running on http://localhost:${PORT}`)
   console.log('🌐 Accessible desde tu móvil en:', `http://192.168.1.181:${PORT}`)
 })
+
+server.keepAliveTimeout = 300000
+server.headersTimeout = 300000

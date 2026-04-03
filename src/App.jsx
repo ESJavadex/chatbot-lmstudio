@@ -3,6 +3,7 @@ import { Chat, MessageInput, MobileSidebar, Sidebar } from './components'
 
 const API_BASE = '/api'
 const STORAGE_KEY = 'chatbot_lmstudio_conversations_v1'
+const ACTIVE_CONVO_KEY = 'chatbot_lmstudio_active_convo'
 
 function App() {
   const [models, setModels] = useState([])
@@ -22,7 +23,19 @@ function App() {
     loadAvailableModels()
     loadConversationsFromStorage()
     checkLmStudioStatus()
+    const savedActive = localStorage.getItem(ACTIVE_CONVO_KEY)
+    if (savedActive) {
+      setCurrentConversationId(savedActive)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!currentConversationId || messages.length > 0) return
+    const conv = conversations.find((c) => c.id === currentConversationId)
+    if (conv && conv.messages) {
+      setMessages(conv.messages)
+    }
+  }, [currentConversationId, conversations])
 
   useEffect(() => {
     const onResize = () => {
@@ -201,6 +214,7 @@ function App() {
     if (!conv) return
     setCurrentConversationId(conversationId)
     setMessages(conv.messages || [])
+    localStorage.setItem(ACTIVE_CONVO_KEY, conversationId)
     if (window.innerWidth < 1024) setIsSidebarOpen(false)
   }
 
@@ -269,7 +283,9 @@ function App() {
     if (!convoId) {
       convoId = `${Date.now()}`
       setCurrentConversationId(convoId)
+      localStorage.setItem(ACTIVE_CONVO_KEY, convoId)
     }
+    saveConversation(convoId, nextMessages)
 
     try {
       const controller = new AbortController()
@@ -361,16 +377,34 @@ function App() {
           saveConversation(convoId, interrupted)
         }
       } else {
-      const errorMessage = {
-        id: (Date.now() + 2).toString(),
-        role: 'assistant',
-        content: `⚠️ ${error.message}`,
-        timestamp: new Date().toISOString(),
+      const isNetworkError = error.message?.toLowerCase().includes('network') || error.message?.toLowerCase().includes('fetch') || error.name === 'TypeError'
+      if (isNetworkError) {
+        if (assistantText) {
+          const lost = [...nextMessages, { ...seedAssistant, content: assistantText + '\n\n_(la conexión se perdió, pero tu conversación se guardó)_ ✅' }]
+          setMessages(lost)
+          saveConversation(convoId, lost)
+        } else {
+          const errorMessage = {
+            id: (Date.now() + 2).toString(),
+            role: 'assistant',
+            content: '⚠️ Error de conexión. Tu mensaje se ha guardado. Vuelve a intentarlo en unos segundos.',
+            timestamp: new Date().toISOString(),
+          }
+          const finalMessages = [...nextMessages, errorMessage]
+          setMessages(finalMessages)
+        }
+      } else {
+        const errorMessage = {
+          id: (Date.now() + 2).toString(),
+          role: 'assistant',
+          content: `⚠️ ${error.message}`,
+          timestamp: new Date().toISOString(),
+        }
+        const finalMessages = [...nextMessages, errorMessage]
+        setMessages(finalMessages)
+        saveConversation(convoId, finalMessages)
       }
-      const finalMessages = [...nextMessages, errorMessage]
-      setMessages(finalMessages)
-      saveConversation(convoId, finalMessages)
-    }
+      }
     } finally {
       abortControllerRef.current = null
       setIsSending(false)
