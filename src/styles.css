@@ -580,6 +580,30 @@ select {
   cursor: not-allowed;
 }
 
+.stop-btn {
+  width: 46px;
+  height: 46px;
+  background: #dc2626;
+  color: white;
+  font-size: 16px;
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: stop-pulse 1.5s ease-in-out infinite;
+}
+
+.stop-btn:hover {
+  background: #ef4444;
+}
+
+@keyframes stop-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .7; }
+}
+
 .search-input,
 .model-select {
   width: 100%;
