@@ -199,6 +199,10 @@ app.post('/v1/chat/completions', async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
 
+      req.on('close', () => {
+        response.body?.cancel?.().catch(() => {})
+      })
+
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
 

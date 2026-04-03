@@ -264,6 +264,7 @@ function App() {
     }
 
     try {
+      const controller = new AbortController()
       const response = await fetch(`${API_BASE}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -272,6 +273,7 @@ function App() {
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
         }),
+        signal: controller.signal,
       })
 
       if (!response.ok) throw new Error('Failed to get response from LM Studio')
@@ -296,33 +298,44 @@ function App() {
         const decoder = new TextDecoder()
         let buffer = ''
 
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
+        const handleVisibility = () => {
+          if (document.visibilityState === 'hidden' && !controller.signal.aborted) {
+            controller.abort()
+          }
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
+        try {
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
 
-          for (const raw of lines) {
-            const line = raw.trim()
-            if (!line) continue
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
 
-            const payload = line.startsWith('data:') ? line.slice(5).trim() : line
-            if (payload === '[DONE]') continue
+            for (const raw of lines) {
+              const line = raw.trim()
+              if (!line) continue
 
-            try {
-              const parsed = JSON.parse(payload)
-              const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.choices?.[0]?.text ?? ''
-              if (delta) {
-                assistantText += delta
-                const updated = [...nextMessages, { ...seedAssistant, content: assistantText }]
-                setMessages(updated)
+              const payload = line.startsWith('data:') ? line.slice(5).trim() : line
+              if (payload === '[DONE]') continue
+
+              try {
+                const parsed = JSON.parse(payload)
+                const delta = parsed?.choices?.[0]?.delta?.content ?? parsed?.choices?.[0]?.text ?? ''
+                if (delta) {
+                  assistantText += delta
+                  const updated = [...nextMessages, { ...seedAssistant, content: assistantText }]
+                  setMessages(updated)
+                }
+              } catch {
+                // Ignore non-JSON chunks
               }
-            } catch {
-              // Ignore non-JSON chunks
             }
           }
+        } finally {
+          document.removeEventListener('visibilitychange', handleVisibility)
         }
       } else {
         const data = await response.json()
@@ -338,6 +351,13 @@ function App() {
       saveConversation(convoId, finalMessages)
     } catch (error) {
       console.error('Error sending message:', error)
+      if (error.name === 'AbortError') {
+        if (assistantText) {
+        const interrupted = [...nextMessages, { ...seedAssistant, content: assistantText + '\n\n_(respuesta interrumpida al cambiar de pestaña_)' }]
+        setMessages(interrupted)
+        saveConversation(convoId, interrupted)
+      }
+    } else {
       const errorMessage = {
         id: (Date.now() + 2).toString(),
         role: 'assistant',
@@ -347,6 +367,7 @@ function App() {
       const finalMessages = [...nextMessages, errorMessage]
       setMessages(finalMessages)
       saveConversation(convoId, finalMessages)
+    }
     } finally {
       setIsSending(false)
     }
